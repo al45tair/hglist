@@ -579,6 +579,7 @@ def list_files(ui, repo, *args, **opts):
 
             if should_format and not first_flush:
                 ui.write('\n')
+                first = True
                 
             def match(ns):
                 if not all and ns[-1].startswith('.'):
@@ -627,6 +628,7 @@ def list_files(ui, repo, *args, **opts):
 
             if should_format and not first_flush:
                 ui.write('\n')
+                first = True
                 
             def match(ns):
                 if not all and ns[-1].startswith('.'):
