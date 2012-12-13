@@ -17,7 +17,7 @@ than the `manifest' built-in command, and with templatized output support.
       classifiers=[
     'Development Status :: 4 - Beta',
     'Environment :: Console',
-    'Indended Audience :: Developers',
+    'Intended Audience :: Developers',
     'License :: OSI Approved :: GNU General Public License (GPL)',
     'Topic :: Software Development :: Version Control',
     ])
