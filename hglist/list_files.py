@@ -35,27 +35,6 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
 
     tuples for each item the match function returns True for."""
 
-    # First do things at the base level
-    prev_dir = None
-    for name in ctx:
-        ns = name.split('/')
-        
-        if prefix:
-            if ns[:len(prefix)] != prefix:
-                continue
-
-            ns = ns[len(prefix):]
-
-        if len(ns) != depth:
-            continue
-
-        if not match(ns):
-            continue
-
-        yield 'file', ns, name, '', repo, ctx
-
-    # Next, do directories at this level
-
     # Cope with sorting
     reverse = False
     for s in sort:
@@ -83,8 +62,8 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
                                         os.path.join(repo.root, base, subpath),
                                         create=False)
 
-                subctx = subrepo[info[1]]
                 newbase = posixpath.join(base, subpath)
+                subctx = subrepo[info[1]]
                 files += [(posixpath.join(newbase, f), f,
                            newbase, subrepo, subctx)
                           for f in subctx]
@@ -121,6 +100,27 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
     
     files.sort(cmp=fcmp)
 
+    # First do things at the base level
+    prev_dir = None
+    for name, ctxname, subpath, subrepo, context in files:
+        ns = name.split('/')
+        
+        if prefix:
+            if ns[:len(prefix)] != prefix:
+                continue
+
+            ns = ns[len(prefix):]
+
+        if len(ns) != depth:
+            continue
+
+        if not match(ns):
+            continue
+
+        yield 'file', ns, ctxname, subpath, subrepo, context
+
+    # Next, do directories at this level
+
     prev_dir = None
     prev_inner = None
     prev_real_depth = 0
@@ -135,7 +135,7 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
 
         if len(ns) <= depth:
             continue
-
+        
         if not match(ns):
             continue
 
@@ -562,6 +562,7 @@ def list_files(ui, repo, *args, **opts):
     # The recursive case
     if recursive:
         first = True
+        first_flush = True
         if not args:
             args = [None]
         else:
@@ -576,6 +577,9 @@ def list_files(ui, repo, *args, **opts):
             else:
                 ps = pattern.split('/')
 
+            if should_format and not first_flush:
+                ui.write('\n')
+                
             def match(ns):
                 if not all and ns[-1].startswith('.'):
                     return False
@@ -607,15 +611,23 @@ def list_files(ui, repo, *args, **opts):
                         list_dir('/'.join(ns), rpath, rpo)
                     first = False
 
+            if should_format:
+                flush_buffer()
+                first_flush = False
+                
         flush_buffer()
         return
 
     # The pattern match case
     if len(args):
         first = True
+        first_flush = True
         for pattern in args:
             ps = pattern.split('/')
 
+            if should_format and not first_flush:
+                ui.write('\n')
+                
             def match(ns):
                 if not all and ns[-1].startswith('.'):
                     return False
@@ -647,6 +659,10 @@ def list_files(ui, repo, *args, **opts):
                         list_dir('/'.join(ns), rpath, rpo)
                     first = False
 
+            if should_format:
+                flush_buffer()
+                first_flush = False
+                
         flush_buffer()
         return
 
