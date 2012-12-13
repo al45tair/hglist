@@ -27,6 +27,7 @@ cmdtable = {
     }
 
 testedwith = '2.4'
+buglink = 'http://alastairs-place.net/hglist'
 
 def extsetup(ui):
     templatefilters.filters['lsdate'] = lsdate
