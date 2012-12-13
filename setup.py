@@ -12,7 +12,7 @@ than the `manifest' built-in command, and with templatized output support.
 """,
       author='Alastair Houghton',
       author_email='alastair@alastairs-place.net',
-      url='http://alastairs-place.net/hglist',
+      url='http://alastairs-place.net/projects/hglist/',
       packages=['hglist'],
       classifiers=[
     'Development Status :: 4 - Beta',
