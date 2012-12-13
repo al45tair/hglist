@@ -585,14 +585,14 @@ def list_files(ui, repo, *args, **opts):
                     return False
                 return True
 
-            for kind, ns, name, rpath, rpo, ctx in walk (ui, repo, ctx,
-                                                         subrepos, match,
-                                                         sort, dumb, prefix, 0):
+            for kind, ns, name, rpath, rpo, ctxt in walk (ui, repo, ctx,
+                                                          subrepos, match,
+                                                          sort, dumb, prefix, 0):
                 if kind == 'file':
                     if should_format:
-                        list_file(ns[-1], rpath, rpo, ctx[name])
+                        list_file(ns[-1], rpath, rpo, ctxt[name])
                     else:
-                        list_file('/'.join(ns), rpath, rpo, ctx[name])
+                        list_file('/'.join(ns), rpath, rpo, ctxt[name])
                     first = False
                 elif should_format and kind == 'dir':
                     if not first:
@@ -624,15 +624,15 @@ def list_files(ui, repo, *args, **opts):
                         return False
                 return True
 
-            for kind, ns, name, rpath, rpo, ctx in walk (ui, repo, ctx,
-                                                         subrepos, match,
-                                                         sort, dumb, prefix,
-                                                         len(ps)):
+            for kind, ns, name, rpath, rpo, ctxt in walk (ui, repo, ctx,
+                                                          subrepos, match,
+                                                          sort, dumb, prefix,
+                                                          len(ps)):
                 if kind == 'file':
-                    if len(ps) > 1 and len(ns) == len(ps):
-                        list_file('/'.join(ns), rpath, rpo, ctx[name])
+                    if not should_format or len(ps) > 1 and len(ns) == len(ps):
+                        list_file('/'.join(ns), rpath, rpo, ctxt[name])
                     else:
-                        list_file(ns[-1], rpath, rpo, ctx[name])
+                        list_file(ns[-1], rpath, rpo, ctxt[name])
                     first = False
                 elif should_format and kind == 'dir':
                     if not first:
