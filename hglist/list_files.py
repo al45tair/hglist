@@ -624,8 +624,8 @@ def list_files(ui, repo, *args, **opts):
             for c in columns:
                 if c + n >= count:
                     break
-                name,sp,sr,fctx = file_buffer[c + n]
-                kind = file_kind(fctx, sp)
+                name,sp,sr,fctx,li = file_buffer[c + n]
+                kind = file_kind(fctx, sp, li)
                 line.append('%-*s' % (ml, name + kind))
 
             ui.write(''.join(line))
