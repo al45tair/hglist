@@ -72,8 +72,6 @@ def walk(ui, repo, ctx, subrepos, links,
 
                 stack.append((newbase, subctx))
     elif links:
-        print ctx.substate
-        
         for subpath, info in ctx.substate.iteritems():
             files.append((subpath, subpath, '', info, repo, ctx))
     
