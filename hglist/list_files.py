@@ -27,7 +27,8 @@ def smartcmp(a, b):
 
     return cmp(a, b)
 
-def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
+def walk(ui, repo, ctx, subrepos, links,
+         match, sort, dumb, prefix=None, depth=1):
     """Walk the specified context of the specified repository, calling
     the match function and yielding
 
@@ -44,7 +45,7 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
         elif s == 'name' or s == '+name':
             break
 
-    files = [(f, f, '', repo, ctx) for f in ctx]
+    files = [(f, f, '', None, repo, ctx) for f in ctx]
 
     if subrepos:
         # Recursively search for subrepositories
@@ -65,11 +66,17 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
                 newbase = posixpath.join(base, subpath)
                 subctx = subrepo[info[1]]
                 files += [(posixpath.join(newbase, f), f,
-                           newbase, subrepo, subctx)
+                           newbase, None,
+                           subrepo, subctx)
                           for f in subctx]
 
                 stack.append((newbase, subctx))
-
+    elif links:
+        print ctx.substate
+        
+        for subpath, info in ctx.substate.iteritems():
+            files.append((subpath, subpath, '', info, repo, ctx))
+    
     # Sort the names piecewise
     def fcmp(x,y):
         xs = x[0].split('/')
@@ -102,7 +109,7 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
 
     # First do things at the base level
     prev_dir = None
-    for name, ctxname, subpath, subrepo, context in files:
+    for name, ctxname, subpath, linkinfo, subrepo, context in files:
         ns = name.split('/')
         
         if prefix:
@@ -117,14 +124,18 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
         if not match(ns):
             continue
 
-        yield 'file', ns, ctxname, subpath, subrepo, context
+        if linkinfo:
+            kind = 'link'
+        else:
+            kind = 'file'
+            
+        yield kind, ns, ctxname, subpath, linkinfo, subrepo, context
 
     # Next, do directories at this level
-
     prev_dir = None
     prev_inner = None
     prev_real_depth = 0
-    for name, ctxname, subpath, subrepo, context in files:
+    for name, ctxname, subpath, linkinfo, subrepo, context in files:
         ns = name.split('/')
 
         if prefix:
@@ -139,34 +150,46 @@ def walk(ui, repo, ctx, subrepos, match, sort, dumb, prefix=None, depth=1):
         if not match(ns):
             continue
 
-        if depth == 0:
-            # depth = 0 means we're in recursive mode
+        if depth < 0:
+            # depth < 0 means we're in recursive mode
             if len(ns) > 1:
                 if len(ns) > prev_real_depth:
-                    yield 'innerdir', ns[:-1], ctxname, subpath, subrepo, None
+                    yield 'innerdir', ns[:-1], ctxname, subpath, linkinfo, \
+                          subrepo, None
                     prev_dir = None
                 prev_real_depth = len(ns)
 
                 this_dir = ns[-2]
                 if this_dir != prev_dir:
-                    yield 'dir', ns[:-1], ctxname, subpath, subrepo, None
+                    yield 'dir', ns[:-1], ctxname, subpath, linkinfo, \
+                          subrepo, None
                     prev_dir = this_dir
-            
-            yield 'file', ns, ctxname, subpath, subrepo, context
+
+            if linkinfo:
+                kind = 'link'
+            else:
+                kind = 'file'
+                
+            yield kind, ns, ctxname, subpath, linkinfo, linkinfo, subrepo, context
             continue
 
         this_dir = '/'.join(ns[:depth])
         if this_dir != prev_dir:
-            yield 'dir', ns[:depth], ctxname, subpath, subrepo, None
+            yield 'dir', ns[:depth], ctxname, subpath, linkinfo, subrepo, None
             prev_dir = this_dir
             prev_inner = None
 
         if len(ns) == depth + 1:
-            yield 'file', ns, ctxname, subpath, subrepo, context
+            if linkinfo:
+                kind = 'link'
+            else:
+                kind = 'file'
+            yield kind, ns, ctxname, subpath, linkinfo, subrepo, context
         else:
             this_inner = ns[depth]
             if this_inner != prev_inner:
-                yield 'innerdir', ns[:depth + 1], ctxname, subpath, subrepo, None
+                yield 'innerdir', ns[:depth + 1], ctxname, subpath, linkinfo, \
+                      subrepo, None
                 prev_inner = this_inner
             
 def list_files(ui, repo, *args, **opts):
@@ -188,13 +211,16 @@ def list_files(ui, repo, *args, **opts):
     Use the -s/--sort option to change the sort order for the files; the
     argument is a comma-separated list of any of the following items:
 
-      :name:    the name of the file
-      :rev:     the last revision at which the file was changed
-      :date:    the date of the last revision at which the file was changed
-      :author:  the name of the user who last changed the file
-      :user:    the short name of the user who last changed the file
-      :size:    the size of the file
-      :subrepo: the name of the subrepository
+      :name:     the name of the file
+      :rev:      the last revision at which the file was changed
+      :date:     the date of the last revision at which the file was changed
+      :author:   the name of the user who last changed the file
+      :user:     the short name of the user who last changed the file
+      :size:     the size of the file
+      :subrepo:  the name of the subrepository
+      :linkurl:  the URL for a subrepository link
+      :linkrev:  the revision for a subrepository link (for hg, a node value)
+      :linktype: the type of a subrepository link
 
     Each item may optionally be preceded by a '+' or a '-' character to
     control sort direction.
@@ -214,27 +240,38 @@ def list_files(ui, repo, *args, **opts):
     subrepository.  Subrepository recursion only works for Mercurial
     subrepositories; foreign subrepositories are not supported.
 
+    When you are using the -S option, the subrepository roots will be listed
+    as if they were directories.  If you want to see the subrepositories as
+    links instead, specify --links.  The --links option and the -S option
+    are mutually exclusive; also note that -S is fragile and cannot support
+    non-Mercurial subrepositories, whereas --links is robust and will work
+    with any kind of subrepository supported by Mercurial.
+
     If the -F/--flags option is specified, an '@', '*', or '/' character
     will be appended to the name to indicate symbolic links, executable files,
-    subrepositories and directories respectively.
+    subrepositories and directories respectively.  If --links is specified,
+    subrepositories will be listed with an '&' character appended.
 
     You can also customise the output using the --template argument; this
     uses the same template system as :hg:`log`; the following keywords are
     defined:
 
-      :name:    the name of the file
-      :mode:    the UNIX mode of the file
-      :size:    the size of the file, in bytes
-      :kind:    an '@', '*', or '/' character depending on the type of
-                the file
-      :subrepo: if this file is in a subrepository, the path within the outer
-                repository
-      :rev:     the last revision at which the file was changed
-      :node:    the changeset ID for that revision
-      :date:    the date of the last revision at which the file was changed
-      :author:  the name of the user who last changed the file
-      :branch:  the branch of the last revision at which the file was changed
-      :desc:    the description of that revision
+      :name:     the name of the file
+      :mode:     the UNIX mode of the file
+      :size:     the size of the file, in bytes
+      :kind:     an '@', '*', '&' or '/' character depending on the type of
+                 the file
+      :subrepo:  if this file is in a subrepository, the path within the outer
+                 repository
+      :rev:      the last revision at which the file was changed
+      :node:     the changeset ID for that revision
+      :date:     the date of the last revision at which the file was changed
+      :author:   the name of the user who last changed the file
+      :branch:   the branch of the last revision at which the file was changed
+      :desc:     the description of that revision
+      :linkurl:  the URL for a subrepository link
+      :linkrev:  the revision for a subrepository link
+      :linktype: the type of a subrepository link
 
     If you pass the --columns switch as well as the --template switch,
     you can obtain column-aligned output.  The --columns switch takes a
@@ -260,6 +297,7 @@ def list_files(ui, repo, *args, **opts):
     long_format = opts['long']
     human = opts['human']
     subrepos = opts['subrepos']
+    links = opts['links']
     recursive = opts['recursive']
     dumb = opts['dumb']
     align_columns = opts['columns']
@@ -352,22 +390,31 @@ def list_files(ui, repo, *args, **opts):
     # Find the path relative to the repository root
     cwd = os.getcwd()
     relpath = os.path.relpath(cwd, repo.root)
-    prefix = relpath.replace(os.path.sep, '/')
-
-    if prefix == '.':
+    if relpath.startswith('../'):
+        # We're outside the repository root, so don't use the prefix code
         prefix = None
     else:
-        prefix = prefix.split('/')
+        prefix = relpath.replace(os.path.sep, '/')
+
+        if prefix == '.':
+            prefix = None
+        else:
+            prefix = prefix.split('/')
     
     def list_dir(name, subpath, subrepo):
-        file_buffer.append((name, subpath, subrepo, None))
+        file_buffer.append((name, subpath, subrepo, None, None))
 
     def list_file(name, subpath, subrepo, fctx):
-        file_buffer.append((name, subpath, subrepo, fctx))
+        file_buffer.append((name, subpath, subrepo, fctx, None))
 
-    def file_kind(fctx, subpath):
+    def list_link(name, subpath, linkinfo, subrepo):
+        file_buffer.append((name, subpath, subrepo, None, linkinfo))
+        
+    def file_kind(fctx, subpath, linkinfo):
         if not flags:
             return ''
+        if linkinfo:
+            return '&'
         if not fctx:
             return '/'
         kind = ''
@@ -379,8 +426,14 @@ def list_files(ui, repo, *args, **opts):
         return kind
 
     def cmp_buf(x,y):
-        xname, xsp, xsr, xctx = x
-        yname, ysp, ysr, yctx = y
+        xname, xsp, xsr, xctx, xli = x
+        yname, ysp, ysr, yctx, yli = y
+
+        if not xli:
+            xli = ('', '', '')
+        if not yli:
+            yli = ('', '', '')
+
         for s in sort:
             invert = False
             if s.startswith('-'):
@@ -408,6 +461,12 @@ def list_files(ui, repo, *args, **opts):
                 ret = cmp(xctx.size(), yctx.size())
             elif s == 'subrepo':
                 ret = cmp(xsp, ysp)
+            elif s == 'linkurl':
+                ret = cmp(xli[0], yli[0])
+            elif s == 'linkrev':
+                ret = cmp(xli[1], yli[1])
+            elif s == 'linktype':
+                ret = cmp(xli[2], yli[2])
             else:
                 xcctx = xsr[xctx.linkrev()]
                 ycctx = ysr[yctx.linkrev()]
@@ -437,7 +496,7 @@ def list_files(ui, repo, *args, **opts):
         do_long = not should_format or long_format
         if not do_long:
             w = ui.termwidth()
-            ml = max([len(n) for n,sp,sr,f in file_buffer])
+            ml = max([len(n) for n,sp,sr,f,li in file_buffer])
             if flags:
                 ml += 1
             ml = (((ml + 1) + 7) & ~7) - 1
@@ -446,21 +505,33 @@ def list_files(ui, repo, *args, **opts):
                 
         if do_long:
             outbuf = []
-            for name, subpath, subrepo, fctx in file_buffer:
-                kind = file_kind(fctx, subpath)
+            for name, subpath, subrepo, fctx, linkinfo in file_buffer:
+                kind = file_kind(fctx, subpath, linkinfo)
                 
                 if formatter:
                     mode = 0o100644
                     
-                    if not fctx:
-                        mode = 0o040755
+                    if linkinfo:
+                        mode = 0o120755
                     else:
-                        ctxflags = fctx.flags()
-                        if 'l' in ctxflags:
-                            mode = 0o120755
-                        if 'x' in ctxflags:
-                            mode = mode | 0o0111
+                        if not fctx:
+                            mode = 0o040755
+                        else:
+                            ctxflags = fctx.flags()
+                            if 'l' in ctxflags:
+                                mode = 0o120755
+                            if 'x' in ctxflags:
+                                mode = mode | 0o0111
 
+                    if linkinfo:
+                        subrepourl = linkinfo[0]
+                        subreporev = linkinfo[1]
+                        subrepotype = linkinfo[2]
+                    else:
+                        subrepourl = ''
+                        subreporev = ''
+                        subrepotype = ''
+                    
                     if not fctx:
                         user = 'nobody'
                         date = (0, 0)
@@ -489,7 +560,10 @@ def list_files(ui, repo, *args, **opts):
                              'node': node,
                              'subrepo': subpath,
                              'desc': desc,
-                             'branch': branch }
+                             'branch': branch,
+                             'linkurl': subrepourl,
+                             'linkrev': subreporev,
+                             'linktype': subrepotype }
 
                     try:
                         fmt = templater.stringify(formatter(template_name,
@@ -590,14 +664,22 @@ def list_files(ui, repo, *args, **opts):
                     return False
                 return True
 
-            for kind, ns, name, rpath, rpo, ctxt in walk (ui, repo, ctx,
-                                                          subrepos, match,
-                                                          sort, dumb, prefix, 0):
+            for kind, ns, name, rpath, li, rpo, ctxt in walk (ui, repo, ctx,
+                                                              subrepos,
+                                                              links, match,
+                                                              sort, dumb, prefix,
+                                                              -1):
                 if kind == 'file':
                     if should_format:
                         list_file(ns[-1], rpath, rpo, ctxt[name])
                     else:
                         list_file('/'.join(ns), rpath, rpo, ctxt[name])
+                    first = False
+                elif kind == 'link':
+                    if should_format:
+                        list_link(ns[-1], rpath, li, rpo)
+                    else:
+                        list_link('/'.join(ns), rpath, li, rpo)
                     first = False
                 elif should_format and kind == 'dir':
                     if not first:
@@ -624,7 +706,22 @@ def list_files(ui, repo, *args, **opts):
         first = True
         first_flush = True
         for pattern in args:
-            ps = pattern.split('/')
+            the_prefix = prefix
+            
+            # Remove starting and trailing / characters
+            if pattern.startswith('/'):
+                pattern = pattern[1:]
+                # Don't use the prefix if an absolute path was given
+                the_prefix = None
+            if pattern.endswith('/'):
+                pattern = pattern[:-1]
+            if pattern == '.':
+                pattern = ''
+            
+            if not pattern:
+                ps = []
+            else:
+                ps = pattern.split('/')
 
             if should_format and not first_flush:
                 ui.write('\n')
@@ -638,17 +735,24 @@ def list_files(ui, repo, *args, **opts):
                         return False
                 return True
 
-            for kind, ns, name, rpath, rpo, ctxt in walk (ui, repo, ctx,
-                                                          subrepos, match,
-                                                          sort, dumb, prefix,
-                                                          len(ps)):
+            for kind, ns, name, rpath, li, rpo, ctxt in walk (ui, repo, ctx,
+                                                              subrepos,
+                                                              links, match,
+                                                              sort, dumb, prefix,
+                                                              len(ps)):
                 if kind == 'file':
                     if not should_format or len(ps) > 1 and len(ns) == len(ps):
                         list_file('/'.join(ns), rpath, rpo, ctxt[name])
                     else:
                         list_file(ns[-1], rpath, rpo, ctxt[name])
                     first = False
-                elif should_format and kind == 'dir':
+                elif kind == 'link':
+                    if not should_format or len(ps) > 1 and len(ns) == len(ps):
+                        list_link('/'.join(ns), rpath, li, rpo)
+                    else:
+                        list_link(ns[-1], rpath, rpo, li)
+                    first = False
+                elif should_format and kind == 'dir' and len(ns):
                     if not first:
                         flush_buffer()
                         ui.write('\n')
@@ -702,7 +806,21 @@ def list_files(ui, repo, *args, **opts):
 
             if not all and ns[0].startswith('.'):
                 continue
-        
+
             list_dir(ns[0], '', None)
+    elif links:
+        for name, info in ctx.substate.iteritems():
+            ns = name.split('/')
+            
+            if prefix:
+                if ns[:len(prefix)] != prefix:
+                    continue
+
+                ns = ns[len(prefix):]
+
+            if not all and ns[0].startswith('.'):
+                continue
+
+            list_link(ns[0], '', info, repo)
 
     flush_buffer()
