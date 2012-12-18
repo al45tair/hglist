@@ -329,6 +329,7 @@ def list_files(ui, repo, *args, **opts):
     if style or template:
         should_format = False
         long_format = True
+        flags = True
     elif long_format:
         if ui.verbose:
             template = ['{mode|lsmode}\0{author}']
